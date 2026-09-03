@@ -235,3 +235,61 @@ test("mergeSegmentOptions merges context and cache_read per key", () => {
   assert.equal(merged.context?.format, "full");
   assert.equal(merged.cache_read?.format, "both");
 });
+
+test("cache_read ratio format renders hit and miss percentages", () => {
+  const ctx = createSegmentContext({ cache_read: { format: "ratio" } }, {
+    usageStats: { input: 2000, output: 0, cacheRead: 8000, cacheWrite: 0, cost: 0, subagentCost: 0 },
+  });
+
+  const rendered = renderSegment("cache_read", ctx);
+  assert.equal(stripAnsi(rendered.content), "cache 80% hit / 20% miss");
+  assert.equal(rendered.visible, true);
+});
+
+test("cache_read ratio format does not hide when cacheRead is 0 and input tokens exist", () => {
+  const ctx = createSegmentContext({ cache_read: { format: "ratio" } }, {
+    usageStats: { input: 1500, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, subagentCost: 0 },
+  });
+
+  const rendered = renderSegment("cache_read", ctx);
+  assert.equal(stripAnsi(rendered.content), "cache 0% hit / 100% miss");
+  assert.equal(rendered.visible, true);
+});
+
+test("cache_read ratio format hides when both cacheRead and input are 0", () => {
+  const ctx = createSegmentContext({ cache_read: { format: "ratio" } }, {
+    usageStats: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, subagentCost: 0 },
+  });
+
+  const rendered = renderSegment("cache_read", ctx);
+  assert.deepEqual(rendered, { content: "", visible: false });
+});
+
+test("session segment prioritizes custom sessionName over sessionId", () => {
+  const namedCtx = createSegmentContext({}, {
+    sessionId: "abcdef1234567890",
+    sessionName: "my-feature-branch",
+  });
+  assert.equal(stripAnsi(renderSegment("session", namedCtx).content), "id my-feature-branch");
+
+  const unnamedCtx = createSegmentContext({}, {
+    sessionId: "abcdef1234567890",
+    sessionName: undefined,
+  });
+  assert.equal(stripAnsi(renderSegment("session", unnamedCtx).content), "id abcdef12");
+
+  const newCtx = createSegmentContext({}, {
+    sessionId: undefined,
+    sessionName: undefined,
+  });
+  assert.equal(stripAnsi(renderSegment("session", newCtx).content), "id new");
+});
+
+test("parsePowerlineConfig accepts cache_read ratio format", () => {
+  const config = parsePowerlineConfig({
+    cache_read: { format: "ratio" },
+  }, PRESET_NAMES);
+
+  assert.equal(config.segmentOptions.cache_read?.format, "ratio");
+});
+

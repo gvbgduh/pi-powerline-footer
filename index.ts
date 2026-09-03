@@ -1069,12 +1069,12 @@ function buildContentFromParts(
  * When terminal is wide enough, secondary segments move up to top bar.
  * When narrow, top bar segments overflow down to secondary row.
  */
-function computeResponsiveLayout(
+export function computeResponsiveLayout(
   ctx: SegmentContext,
   presetDef: ReturnType<typeof getPreset>,
   allSegmentIds: StatusLineSegmentId[],
   availableWidth: number
-): { topContent: string; secondaryContent: string } {
+): { topContent: string; secondaryContent: string; secondaryLines: string[] } {
   const separatorStyle = config.separator ?? presetDef.separator;
   const separatorDef = getSeparator(separatorStyle);
   const sepWidth = visibleWidth(separatorDef.left) + 2; // separator + spaces around it
@@ -1089,7 +1089,7 @@ function computeResponsiveLayout(
   }
 
   if (renderedSegments.length === 0) {
-    return { topContent: "", secondaryContent: "" };
+    return { topContent: "", secondaryContent: "", secondaryLines: [] };
   }
 
   // Calculate how many segments fit in top bar
@@ -1112,24 +1112,34 @@ function computeResponsiveLayout(
     }
   }
 
-  // Fit overflow segments into secondary row (same width constraint)
-  // Stop at first non-fitting segment to preserve ordering
-  let secondaryWidth = baseOverhead;
-  let secondarySegments: string[] = [];
+  // Multi-line greedy row binning: fit overflow segments into secondary rows
+  // Wrap overflow segments across Line 2, Line 3, Line 4, etc. instead of dropping them
+  const secondaryLines: string[] = [];
+  if (overflowSegments.length > 0) {
+    let currentRow: string[] = [];
+    let currentRowWidth = baseOverhead;
 
-  for (const seg of overflowSegments) {
-    const neededWidth = seg.width + (secondarySegments.length > 0 ? sepWidth : 0);
-    if (secondaryWidth + neededWidth <= availableWidth) {
-      secondarySegments.push(seg.content);
-      secondaryWidth += neededWidth;
-    } else {
-      break;
+    for (const seg of overflowSegments) {
+      const neededWidth = seg.width + (currentRow.length > 0 ? sepWidth : 0);
+      if (currentRow.length > 0 && currentRowWidth + neededWidth > availableWidth) {
+        secondaryLines.push(buildContentFromParts(currentRow, separatorStyle));
+        currentRow = [seg.content];
+        currentRowWidth = baseOverhead + seg.width;
+      } else {
+        currentRow.push(seg.content);
+        currentRowWidth += neededWidth;
+      }
+    }
+
+    if (currentRow.length > 0) {
+      secondaryLines.push(buildContentFromParts(currentRow, separatorStyle));
     }
   }
 
   return {
     topContent: buildContentFromParts(topSegments, separatorStyle),
-    secondaryContent: buildContentFromParts(secondarySegments, separatorStyle),
+    secondaryContent: secondaryLines.join("\n"),
+    secondaryLines,
   };
 }
 
@@ -1216,7 +1226,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
 
   // Cache for the top and secondary powerline widgets.
   let lastLayoutWidth = 0;
-  let lastLayoutResult: { topContent: string; secondaryContent: string } | null = null;
+  let lastLayoutResult: { topContent: string; secondaryContent: string; secondaryLines: string[] } | null = null;
   let lastLayoutTimestamp = 0;
   let layoutDirty = true;
   let forceNextLayoutRecompute = false;
@@ -1870,6 +1880,11 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     currentCtx = ctx;
     currentThinkingLevel = null;
     liveAssistantUsage = null;
+    requestImmediateStatusRender({ deferDuringTyping: false });
+  });
+
+  pi.on("session_info_changed", async (_event, ctx) => {
+    currentCtx = ctx;
     requestImmediateStatusRender({ deferDuringTyping: false });
   });
 
@@ -2740,6 +2755,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
       model: ctx.model,
       thinkingLevel,
       sessionId: ctx.sessionManager?.getSessionId?.(),
+      sessionName: ctx.sessionManager?.getSessionName?.(),
       cwd: ctx.cwd,
       usageStats: { input, output, cacheRead, cacheWrite, cost, subagentCost },
       contextTokens,
@@ -2769,7 +2785,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
    * Get cached responsive layout or compute fresh one.
    * The segment context scans session state, so keep it stable across render bursts.
    */
-  function getResponsiveLayout(width: number, theme: Theme): { topContent: string; secondaryContent: string } {
+  function getResponsiveLayout(width: number, theme: Theme): { topContent: string; secondaryContent: string; secondaryLines: string[] } {
     const now = Date.now();
     const cacheTtl = isStreaming ? STREAMING_LAYOUT_CACHE_TTL_MS : LAYOUT_CACHE_TTL_MS;
 
@@ -2805,7 +2821,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
       if (!isStaleExtensionContextError(error)) throw error;
       currentCtx = null;
       lastLayoutWidth = width;
-      lastLayoutResult = { topContent: "", secondaryContent: "" };
+      lastLayoutResult = { topContent: "", secondaryContent: "", secondaryLines: [] };
       lastLayoutTimestamp = now;
       layoutDirty = false;
       forceNextLayoutRecompute = false;
@@ -2850,7 +2866,9 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     if (!currentCtx) return [];
 
     const layout = getResponsiveLayout(width, theme);
-    return layout.secondaryContent ? [layout.secondaryContent] : [];
+    return layout.secondaryLines && layout.secondaryLines.length > 0
+      ? layout.secondaryLines
+      : (layout.secondaryContent ? [layout.secondaryContent] : []);
   }
 
   function renderPowerlineQueuePreviewLines(width: number, theme: Theme): string[] {

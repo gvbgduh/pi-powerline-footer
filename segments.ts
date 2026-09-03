@@ -426,7 +426,8 @@ const sessionSegment: StatusLineSegment = {
   render(ctx) {
     const icons = getIcons();
     const sessionId = ctx.sessionId;
-    const display = sessionId?.slice(0, 8) || "new";
+    const sessionName = ctx.sessionName;
+    const display = sessionName || (sessionId?.slice(0, 8) || "new");
 
     return { content: withIcon(icons.session, display), visible: true };
   },
@@ -446,9 +447,19 @@ const cacheReadSegment: StatusLineSegment = {
   render(ctx) {
     const icons = getIcons();
     const { cacheRead, input } = ctx.usageStats;
+    const format = ctx.options.cache_read?.format ?? "tokens";
+
+    if (format === "ratio") {
+      if (!cacheRead && !input) return { content: "", visible: false };
+      const total = input + cacheRead;
+      const hitRate = total > 0 ? Math.round((cacheRead / total) * 100) : 0;
+      const missRate = 100 - hitRate;
+      const content = [icons.cache, `${hitRate}% hit / ${missRate}% miss`].filter(Boolean).join(" ");
+      return { content: color(ctx, "tokens", content), visible: true };
+    }
+
     if (!cacheRead) return { content: "", visible: false };
 
-    const format = ctx.options.cache_read?.format ?? "tokens";
     const hitRate = input + cacheRead > 0
       ? ((cacheRead / (input + cacheRead)) * 100).toFixed(0)
       : "0";

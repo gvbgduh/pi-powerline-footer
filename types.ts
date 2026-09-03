@@ -101,7 +101,7 @@ export interface StatusLineSegmentOptions {
   time?: { format?: "12h" | "24h"; showSeconds?: boolean };
   cost?: { subscriptionDisplay?: "subscription" | "reported-cost" | "both"; currency?: CostCurrencyCode };
   context?: { format?: "full" | "percent" };
-  cache_read?: { format?: "tokens" | "percent" | "both" };
+  cache_read?: { format?: "tokens" | "percent" | "both" | "ratio" };
 }
 
 export type CustomItemPosition = "left" | "right" | "secondary";
@@ -188,6 +188,7 @@ export interface SegmentContext {
   } | undefined;
   thinkingLevel: string;
   sessionId: string | undefined;
+  sessionName?: string | null;
   cwd?: string;
   
   // Computed
